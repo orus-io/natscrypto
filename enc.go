@@ -119,6 +119,13 @@ func (s *EncodedSubscription) makeMsgHandler(cb nats.Handler) (MsgHandler, error
 			subV := reflect.ValueOf(m.Subject)
 			replyV := reflect.ValueOf(m.Reply)
 			oV = []reflect.Value{subV, replyV, oValue}
+		case 4:
+			subV := reflect.ValueOf(m.Subject)
+			replyV := reflect.ValueOf(m.Reply)
+			signerV := reflect.ValueOf(m.Signer)
+			oV = []reflect.Value{subV, replyV, signerV, oValue}
+		default:
+			panic("Too many args (>4)")
 		}
 		cbValue.Call(oV)
 	}, nil
