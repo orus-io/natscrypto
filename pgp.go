@@ -16,6 +16,13 @@ var (
 	ErrNilEntity = errors.New("Nil Entity")
 )
 
+var (
+	// private indirection of openpgp.Encrypt for testing purpose
+	openpgpEncrypt = openpgp.Encrypt
+	// private indirection of openpgp.ReadMessage for testing purpose
+	openpgpReadMessage = openpgp.ReadMessage
+)
+
 // NewPGPEncrypter initialize a PGPEncrypter
 func NewPGPEncrypter(entities ...*openpgp.Entity) *PGPEncrypter {
 	e := PGPEncrypter{
@@ -120,7 +127,7 @@ func (e *PGPEncrypter) EncryptData(data []byte, recipients []string, signer stri
 	// will be returned as an io.Reader after success
 	buf := new(bytes.Buffer)
 
-	w, err := openpgp.Encrypt(buf, recipientEntityList, signerEntity, nil, nil)
+	w, err := openpgpEncrypt(buf, recipientEntityList, signerEntity, nil, nil)
 
 	if err != nil {
 		return nil, err
@@ -140,7 +147,7 @@ func (e *PGPEncrypter) EncryptData(data []byte, recipients []string, signer stri
 // DecryptData decrypt the data and extract the recipients and signer
 func (e *PGPEncrypter) DecryptData(data []byte) (cleardata []byte, recipients []string, signer string, err error) {
 	buf := bytes.NewBuffer(data)
-	md, err := openpgp.ReadMessage(buf, &e.AllEntities, nil, nil)
+	md, err := openpgpReadMessage(buf, &e.AllEntities, nil, nil)
 
 	if err != nil {
 		err = fmt.Errorf("Error decrypting message: %s", err)
