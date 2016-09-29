@@ -11,6 +11,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TimeoutChan(duration time.Duration) chan bool {
+	timeout := make(chan bool, 1)
+	go func() {
+		time.Sleep(duration)
+		timeout <- true
+	}()
+	return timeout
+}
+
 type DummyEncrypter struct{}
 
 func (DummyEncrypter) EncryptData(data []byte, recipients []string, signer string) ([]byte, error) {
@@ -190,8 +199,8 @@ func TestSubscriptions(t *testing.T) {
 	sub.SetAuthorizedSigners("me")
 	defer sub.Unsubscribe()
 
-	var received *Msg
-	s, err := ec.Subscribe("test", func(msg *Msg) { received = msg })
+	received := make(chan *Msg, 1)
+	s, err := ec.Subscribe("test", func(msg *Msg) { received <- msg })
 	if err != nil {
 		assert.Error(t, err)
 		return
@@ -208,9 +217,6 @@ func TestSubscriptions(t *testing.T) {
 
 	ec.Publish("test", []byte("Salut !"))
 
-	// Let time for the async & chan subscriptions
-	time.Sleep(time.Millisecond)
-
 	// Test sync subscription
 	msg, err := sub.NextMsg(time.Second)
 	assert.Nil(t, err)
@@ -218,14 +224,25 @@ func TestSubscriptions(t *testing.T) {
 	assert.Equal(t, []string{"riri", "fifi", "loulou"}, msg.Recipients)
 
 	// Test acync subscription
-	assert.NotNil(t, received)
-	assert.Equal(t, "me", received.Signer)
-	assert.Equal(t, []string{"riri", "fifi", "loulou"}, received.Recipients)
+	timeout := TimeoutChan(time.Second)
+	select {
+	case <-timeout:
+		t.Errorf("async subscription callback never called")
+	case msg := <-received:
+		assert.NotNil(t, msg)
+		assert.Equal(t, "me", msg.Signer)
+		assert.Equal(t, []string{"riri", "fifi", "loulou"}, msg.Recipients)
+	}
 
 	// Test chan subscription
-	received = <-ch
-	assert.Equal(t, "me", received.Signer)
-	assert.Equal(t, []string{"riri", "fifi", "loulou"}, received.Recipients)
+	timeout = TimeoutChan(time.Second)
+	select {
+	case <-timeout:
+		t.Errorf("chan subscription never received msg")
+	case msg := <-ch:
+		assert.Equal(t, "me", msg.Signer)
+		assert.Equal(t, []string{"riri", "fifi", "loulou"}, msg.Recipients)
+	}
 }
 
 func TestEncryptionFailures(t *testing.T) {
@@ -274,7 +291,7 @@ func TestDecryptionFailures(t *testing.T) {
 	}
 	defer ec.Close()
 
-	t.Run("Subscribe no handler", func(t *testing.T) {
+	t.Run("Subscribe no error handler", func(t *testing.T) {
 		sub, err := ec.Subscribe("test", func(*Msg) { t.Error("Callback was called") })
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
@@ -286,7 +303,7 @@ func TestDecryptionFailures(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	})
 
-	t.Run("SyncSubscribe no handler", func(t *testing.T) {
+	t.Run("SyncSubscribe no error handler", func(t *testing.T) {
 		sub, err := ec.SubscribeSync("test")
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
@@ -299,7 +316,7 @@ func TestDecryptionFailures(t *testing.T) {
 		assert.Equal(t, ErrDecryptFailed, err)
 	})
 
-	t.Run("ChanSubscribe no handler", func(t *testing.T) {
+	t.Run("ChanSubscribe no error handler", func(t *testing.T) {
 		ch := make(chan *Msg)
 		defer close(ch)
 		go func() {
@@ -326,9 +343,9 @@ func TestDecryptionFailures(t *testing.T) {
 	)
 
 	t.Run("Subscribe pass through handler", func(t *testing.T) {
-		var hit = false
+		var hit = make(chan bool, 1)
 		sub, err := ec.Subscribe("test", func(msg *Msg) {
-			hit = true
+			hit <- true
 			assert.Equal(t, ErrDecryptFailed, msg.Error)
 		})
 		assert.Nil(t, err)
@@ -337,10 +354,13 @@ func TestDecryptionFailures(t *testing.T) {
 		// send an unencrypted message
 		assert.Nil(t, ec.Conn.Publish("test", []byte("Hello")))
 
-		// Make sure our callback would be called if attempted to
-		time.Sleep(time.Millisecond)
-
-		assert.True(t, hit, "The callback was not called")
+		timeout := TimeoutChan(time.Second)
+		select {
+		case <-timeout:
+			t.Error("The callback was never called")
+		case <-hit:
+			t.Log("Callback hit !")
+		}
 	})
 
 	t.Run("Subscribe pass through handler", func(t *testing.T) {
@@ -351,12 +371,13 @@ func TestDecryptionFailures(t *testing.T) {
 		// send an unencrypted message
 		assert.Nil(t, ec.Conn.Publish("test", []byte("Hello")))
 
-		msg, err := sub.NextMsg(time.Millisecond)
+		msg, err := sub.NextMsg(time.Second)
 		assert.Nil(t, err)
 		assert.Equal(t, ErrDecryptFailed, msg.Error)
 	})
 
 	t.Run("ChanSubscribe pass through handler", func(t *testing.T) {
+		hit := make(chan bool, 1)
 		ch := make(chan *Msg)
 		defer close(ch)
 		go func() {
@@ -364,6 +385,7 @@ func TestDecryptionFailures(t *testing.T) {
 			if !ok {
 				t.Errorf("No message received")
 			}
+			hit <- true
 			assert.Equal(t, ErrDecryptFailed, msg.Error)
 		}()
 		sub, err := ec.ChanSubscribe("test", ch)
@@ -373,15 +395,20 @@ func TestDecryptionFailures(t *testing.T) {
 		// send an unencrypted message
 		assert.Nil(t, ec.Conn.Publish("test", []byte("Hello")))
 
-		// Make sure our callback would be called if attempted to
-		time.Sleep(time.Millisecond)
+		timeout := TimeoutChan(time.Second)
+		select {
+		case <-timeout:
+			t.Error("The chan received nothing")
+		case <-hit:
+			t.Log("The chan go a message !")
+		}
 	})
 
 	ec.SetDefaultDecryptErrorHandler(nil)
 
-	makeBlockingHandler := func(t *testing.T, hit *bool) DecryptErrorHandler {
+	makeBlockingHandler := func(t *testing.T, hit chan bool) DecryptErrorHandler {
 		return func(sub *Subscription, msg *Msg) *Msg {
-			*hit = true
+			hit <- true
 			assert.Equal(t, ErrDecryptFailed, msg.Error)
 			return nil
 		}
@@ -392,16 +419,19 @@ func TestDecryptionFailures(t *testing.T) {
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
 
-		var hit = false
-		sub.SetDecryptErrorHandler(makeBlockingHandler(t, &hit))
+		hit := make(chan bool, 1)
+		timeout := TimeoutChan(time.Second * 1)
+		sub.SetDecryptErrorHandler(makeBlockingHandler(t, hit))
 
 		// send an unencrypted message
 		assert.Nil(t, ec.Conn.Publish("test", []byte("Hello")))
 
-		// Make sure our callback would be called if attempted to
-		time.Sleep(time.Millisecond)
-
-		assert.True(t, hit)
+		select {
+		case <-timeout:
+			t.Error("Error handler not called")
+		case <-hit:
+			t.Logf("Error handler hit")
+		}
 	})
 
 	t.Run("SyncSubscribe blocking handler", func(t *testing.T) {
@@ -409,17 +439,23 @@ func TestDecryptionFailures(t *testing.T) {
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
 
-		var hit = false
-		sub.SetDecryptErrorHandler(makeBlockingHandler(t, &hit))
+		hit := make(chan bool, 1)
+		timeout := TimeoutChan(time.Second / 2)
+		sub.SetDecryptErrorHandler(makeBlockingHandler(t, hit))
 
 		// send an unencrypted message
 		assert.Nil(t, ec.Conn.Publish("test", []byte("Hello")))
 
-		msg, err := sub.NextMsg(time.Millisecond)
+		msg, err := sub.NextMsg(time.Second)
 		assert.Nil(t, msg)
 		assert.Equal(t, ErrDecryptFailed, err)
 
-		assert.True(t, hit)
+		select {
+		case <-timeout:
+			t.Error("Error handler not called")
+		case <-hit:
+			t.Logf("Error handler hit")
+		}
 	})
 
 	t.Run("ChanSubscribe blocking handler", func(t *testing.T) {
@@ -436,16 +472,19 @@ func TestDecryptionFailures(t *testing.T) {
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
 
-		var hit = false
-		sub.SetDecryptErrorHandler(makeBlockingHandler(t, &hit))
+		hit := make(chan bool, 1)
+		timeout := TimeoutChan(time.Second / 2)
+		sub.SetDecryptErrorHandler(makeBlockingHandler(t, hit))
 
 		// send an unencrypted message
 		assert.Nil(t, ec.Conn.Publish("test", []byte("Hello")))
 
-		// Make sure our callback would be called if attempted to
-		time.Sleep(time.Millisecond)
-
-		assert.True(t, hit)
+		select {
+		case <-timeout:
+			t.Error("Error handler not called")
+		case <-hit:
+			t.Logf("Error handler hit")
+		}
 	})
 
 }
