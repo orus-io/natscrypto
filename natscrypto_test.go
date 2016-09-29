@@ -181,11 +181,13 @@ func TestSubscriptions(t *testing.T) {
 	}
 	defer ec.Close()
 	ec.SetSubjectRecipients("test", []string{"riri", "fifi", "loulou"})
+
 	sub, err := ec.SubscribeSync("test")
 	if err != nil {
 		assert.Error(t, err)
 		return
 	}
+	sub.SetAuthorizedSigners("me")
 	defer sub.Unsubscribe()
 
 	var received *Msg

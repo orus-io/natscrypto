@@ -26,6 +26,10 @@ var (
 	ErrUnknownSigner = errors.New("Unknown Signer")
 	// ErrUnsignedMessage is returned by DecryptData if the message is not pgp signed
 	ErrUnsignedMessage = errors.New("Unsigned Message")
+
+	// ErrSignerNotAuthorized is set on Msg when the signer is not authorized on a
+	// subscription
+	ErrSignerNotAuthorized = errors.New("natscrypto: Signer not authorized")
 )
 
 // NewConn wraps a nats.Conn in a Conn that uses the
@@ -346,11 +350,19 @@ type Subscription struct {
 	Conn                *Conn
 	decryptErrorHandler DecryptErrorHandler
 	upChan              chan *nats.Msg
+	authorizedSigners   []string
 }
 
 func (s *Subscription) setSub(sub *nats.Subscription) *Subscription {
 	s.Subscription = sub
 	return s
+}
+
+// SetAuthorizedSigners changes the list of signers allowed on this subscription.
+// Any message received from a signer outside this list will be stopped
+// and handled as error
+func (s *Subscription) SetAuthorizedSigners(signers ...string) {
+	s.authorizedSigners = signers
 }
 
 // SetDecryptErrorHandler sets a callback that is called when a decryption
@@ -366,9 +378,27 @@ func (s *Subscription) SetDecryptErrorHandler(handler DecryptErrorHandler) {
 
 func (s *Subscription) decryptMsg(msg *nats.Msg) (decryptedMsg *Msg, err error) {
 	decryptedMsg = s.Conn.decryptMsg(msg)
+
+	if decryptedMsg.Error == nil {
+		as := s.authorizedSigners
+		if len(as) != 0 {
+			var authorized bool
+			for _, s := range as {
+				if decryptedMsg.Signer == s {
+					authorized = true
+					break
+				}
+			}
+			if !authorized {
+				decryptedMsg.Error = ErrSignerNotAuthorized
+			}
+		}
+	}
+
 	if decryptedMsg.Error == nil {
 		return
 	}
+
 	err = decryptedMsg.Error
 	if s.decryptErrorHandler != nil {
 		decryptedMsg = s.decryptErrorHandler(s, decryptedMsg)
