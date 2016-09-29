@@ -78,6 +78,8 @@ type Msg struct {
 }
 
 // Encrypter is implemented by message encrypters
+// Both function should be routine-safe as they may be called in parallel
+// routines
 type Encrypter interface {
 	EncryptData(data []byte, recipients []string, signer string) ([]byte, error)
 	DecryptData(data []byte) (cleardata []byte, recipients []string, signer string, err error)
@@ -109,6 +111,16 @@ type MsgHandler func(msg *Msg)
 // This var is to allow tests to provide a tweaked ticker
 var timeNewTicker = time.NewTicker
 
+func (c *Conn) cleanupReplyRecipients(t time.Time) {
+	c.recipientsLock.Lock()
+	defer c.recipientsLock.Unlock()
+	for subject, entry := range c.ReplyRecipients {
+		if t.After(entry.Expire) {
+			delete(c.ReplyRecipients, subject)
+		}
+	}
+}
+
 func (c *Conn) watchReplyRecipients() {
 	ticker := timeNewTicker(time.Minute)
 	defer ticker.Stop()
@@ -117,11 +129,7 @@ func (c *Conn) watchReplyRecipients() {
 		case <-c.exitWatchReplyRecipients:
 			break
 		case t := <-ticker.C:
-			for subject, entry := range c.ReplyRecipients {
-				if t.After(entry.Expire) {
-					delete(c.ReplyRecipients, subject)
-				}
-			}
+			c.cleanupReplyRecipients(t)
 		}
 	}
 }
@@ -150,11 +158,15 @@ func (c *Conn) SetDefaultDecryptErrorHandler(handler DecryptErrorHandler) {
 // if subject is "", the recipients are used as default for subjects having no
 // explicit recipients
 func (c *Conn) SetSubjectRecipients(subject string, recipients []string) {
+	c.recipientsLock.Lock()
+	defer c.recipientsLock.Unlock()
 	c.SubjectRecipients[subject] = recipients
 }
 
 // SetMultiSubjectRecipients associates recipients to subjects
 func (c *Conn) SetMultiSubjectRecipients(recipients map[string][]string) {
+	c.recipientsLock.Lock()
+	defer c.recipientsLock.Unlock()
 	for subject, recipients := range recipients {
 		c.SubjectRecipients[subject] = recipients
 	}
@@ -162,6 +174,8 @@ func (c *Conn) SetMultiSubjectRecipients(recipients map[string][]string) {
 
 // GetRecipients returns the default recipients for a given subject.
 func (c *Conn) GetRecipients(subject string) []string {
+	c.recipientsLock.RLock()
+	defer c.recipientsLock.RUnlock()
 	recipients, ok := c.SubjectRecipients[subject]
 	if ok {
 		return recipients
