@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"sync"
 
 	"golang.org/x/crypto/openpgp"
 )
@@ -30,6 +31,7 @@ type PGPEncrypter struct {
 	Identities      map[string]*openpgp.Entity
 	AllEntities     openpgp.EntityList
 	OneShotEntities map[string]*openpgp.Entity
+	entitiesLock    sync.RWMutex
 }
 
 // AddEntity add one of more openpgp entities to the encrypter.
@@ -37,6 +39,8 @@ type PGPEncrypter struct {
 // which means the PGPEncrypter will be able to decrypt messages to it
 // Panics if the entity is nil or has no PrimaryKey
 func (e *PGPEncrypter) AddEntity(entities ...*openpgp.Entity) {
+	e.entitiesLock.Lock()
+	defer e.entitiesLock.Unlock()
 	for _, entity := range entities {
 		if entity == nil {
 			panic(ErrNilEntity)
@@ -57,6 +61,8 @@ func (e *PGPEncrypter) AddEntity(entities ...*openpgp.Entity) {
 // AddOneShotEntity add an entity that can be used only once for encrypting only
 // (not for verification)
 func (e *PGPEncrypter) AddOneShotEntity(entity *openpgp.Entity) string {
+	e.entitiesLock.Lock()
+	defer e.entitiesLock.Unlock()
 	id := string(entity.PrimaryKey.Fingerprint[:20])
 	e.OneShotEntities[id] = entity
 	return id
@@ -64,6 +70,8 @@ func (e *PGPEncrypter) AddOneShotEntity(entity *openpgp.Entity) string {
 
 // RemoveID removes an entity from the encrypter given its fingerprint
 func (e *PGPEncrypter) RemoveID(id string) {
+	e.entitiesLock.Lock()
+	defer e.entitiesLock.Unlock()
 	for i, entity := range e.AllEntities {
 		if string(entity.PrimaryKey.Fingerprint[:20]) == id {
 			e.AllEntities = append(e.AllEntities[:i], e.AllEntities[i+1:]...)
@@ -73,28 +81,38 @@ func (e *PGPEncrypter) RemoveID(id string) {
 	delete(e.Identities, id)
 }
 
+func (e *PGPEncrypter) getEntity(id string) *openpgp.Entity {
+	e.entitiesLock.RLock()
+	entity, ok := e.Identities[id]
+	e.entitiesLock.RUnlock()
+	if !ok {
+		e.entitiesLock.Lock()
+		if entity, ok = e.OneShotEntities[id]; ok {
+			delete(e.OneShotEntities, id)
+		}
+		e.entitiesLock.Unlock()
+	}
+	return entity
+}
+
 // EncryptData encrypt the data with the recipients public keys and sign it
 // sith signer private key
-func (e PGPEncrypter) EncryptData(data []byte, recipients []string, signer string) ([]byte, error) {
+func (e *PGPEncrypter) EncryptData(data []byte, recipients []string, signer string) ([]byte, error) {
 	var (
 		recipientEntityList openpgp.EntityList
 	)
 
-	signerEntity, ok := e.Identities[signer]
-	if !ok {
+	signerEntity := e.getEntity(signer)
+	if signerEntity == nil {
 		return nil, fmt.Errorf("Unknown signer id: %s", signer)
 	}
 	if signerEntity.PrivateKey == nil {
 		return nil, fmt.Errorf("No private key for this identity: %s", signer)
 	}
 	for _, id := range recipients {
-		entity, ok := e.Identities[id]
-		if !ok {
-			if entity, ok = e.OneShotEntities[id]; ok {
-				delete(e.OneShotEntities, id)
-			} else {
-				return nil, fmt.Errorf("Unknown recipient id: %s", id)
-			}
+		entity := e.getEntity(id)
+		if entity == nil {
+			return nil, fmt.Errorf("Unknown recipient id: %s", id)
 		}
 		recipientEntityList = append(recipientEntityList, entity)
 	}
@@ -120,7 +138,7 @@ func (e PGPEncrypter) EncryptData(data []byte, recipients []string, signer strin
 }
 
 // DecryptData decrypt the data and extract the recipients and signer
-func (e PGPEncrypter) DecryptData(data []byte) (cleardata []byte, recipients []string, signer string, err error) {
+func (e *PGPEncrypter) DecryptData(data []byte) (cleardata []byte, recipients []string, signer string, err error) {
 	buf := bytes.NewBuffer(data)
 	md, err := openpgp.ReadMessage(buf, &e.AllEntities, nil, nil)
 
