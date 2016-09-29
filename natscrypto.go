@@ -484,21 +484,25 @@ func (s *Subscription) Unsubscribe() error {
 // Subscribe will create a subscription on the given subject and process incoming
 // messages using the specified Handler. The Handler should be a func that matches
 // a signature from the description of Handler from above.
-func (c *Conn) Subscribe(subject string, cb MsgHandler) (*Subscription, error) {
-	return c.QueueSubscribe(subject, "", cb)
+// signers is an optional list of authorized signers
+func (c *Conn) Subscribe(subject string, cb MsgHandler, signers ...string) (*Subscription, error) {
+	return c.QueueSubscribe(subject, "", cb, signers...)
 }
 
 // ChanSubscribe will place all messages received on the channel.
 // You should not close the channel until sub.Unsubscribe() has been called.
-func (c *Conn) ChanSubscribe(subject string, ch chan *Msg) (*Subscription, error) {
-	return c.ChanQueueSubscribe(subject, "", ch)
+func (c *Conn) ChanSubscribe(subject string, ch chan *Msg, signers ...string) (*Subscription, error) {
+	return c.ChanQueueSubscribe(subject, "", ch, signers...)
 }
 
 // QueueSubscribe will create a queue subscription on the given subject and process
 // incoming messages using the specified Handler.
-func (c *Conn) QueueSubscribe(subject, queue string, cb MsgHandler) (*Subscription, error) {
+func (c *Conn) QueueSubscribe(subject, queue string, cb MsgHandler, signers ...string) (*Subscription, error) {
 	var err error
 	sub := newSubscription(c)
+	if len(signers) != 0 {
+		sub.SetAuthorizedSigners(signers...)
+	}
 	sub.Subscription, err = c.Conn.QueueSubscribe(subject, queue, sub.makeHandler(cb))
 	if err != nil {
 		return nil, err
@@ -508,9 +512,12 @@ func (c *Conn) QueueSubscribe(subject, queue string, cb MsgHandler) (*Subscripti
 
 // ChanQueueSubscribe will place all messages received on the channel.
 // You should not close the channel until sub.Unsubscribe() has been called.
-func (c *Conn) ChanQueueSubscribe(subject, group string, ch chan *Msg) (*Subscription, error) {
+func (c *Conn) ChanQueueSubscribe(subject, group string, ch chan *Msg, signers ...string) (*Subscription, error) {
 	var err error
 	sub := newSubscription(c)
+	if len(signers) != 0 {
+		sub.SetAuthorizedSigners(signers...)
+	}
 	sub.Subscription, err = c.Conn.ChanQueueSubscribe(subject, group, sub.makeDecryptingChan(ch))
 	if err != nil {
 		return nil, err
@@ -519,9 +526,12 @@ func (c *Conn) ChanQueueSubscribe(subject, group string, ch chan *Msg) (*Subscri
 }
 
 // SubscribeSync is syntactic sugar for Subscribe(subject, nil).
-func (c *Conn) SubscribeSync(subj string) (*Subscription, error) {
+func (c *Conn) SubscribeSync(subj string, signers ...string) (*Subscription, error) {
 	var err error
 	sub := newSubscription(c)
+	if len(signers) != 0 {
+		sub.SetAuthorizedSigners(signers...)
+	}
 	sub.Subscription, err = c.Conn.SubscribeSync(subj)
 	if err != nil {
 		return nil, err

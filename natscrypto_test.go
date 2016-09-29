@@ -200,7 +200,7 @@ func TestSubscriptions(t *testing.T) {
 	defer sub.Unsubscribe()
 
 	received := make(chan *Msg, 1)
-	s, err := ec.Subscribe("test", func(msg *Msg) { received <- msg })
+	s, err := ec.Subscribe("test", func(msg *Msg) { received <- msg }, "me")
 	if err != nil {
 		assert.Error(t, err)
 		return
