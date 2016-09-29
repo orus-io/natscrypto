@@ -30,6 +30,7 @@ var (
 
 // NewConn wraps a nats.Conn in a Conn that uses the
 // passed encrypter
+// A same nats.Conn can be share among several natscrypto.Conn.
 func NewConn(c *nats.Conn, identity string, encrypter Encrypter) (*Conn, error) {
 	if c == nil {
 		return nil, ErrNilConnection
@@ -125,9 +126,16 @@ func (c *Conn) watchReplyRecipients() {
 	}
 }
 
-// Close closes the connection
+// Close closes the encrypted connection, _not_ the underlying nats.Conn.
+// To close both the encryption layer and the actual nats.Conn, use
+// CloseAll()
 func (c *Conn) Close() {
 	c.exitWatchReplyRecipients <- nil
+}
+
+// CloseAll closes the encrypted connection _and_ the underlying nats.Conn
+func (c *Conn) CloseAll() {
+	c.Close()
 	c.Conn.Close()
 }
 
