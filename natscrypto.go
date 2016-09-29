@@ -1,5 +1,3 @@
-// Package natscrypto provides nats.Conn wrappers to automatically encrypt/decrypt
-// messages, as well a port of nats.EncodedConn on top of it.
 package natscrypto
 
 import (
