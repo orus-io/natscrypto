@@ -111,7 +111,7 @@ func TestSetSubject(t *testing.T) {
 	assert.Equal(t, []string{"riri", "fifi", "loulou"}, ec.GetRecipients("test"))
 
 	ec.SetMultiSubjectRecipients(map[string][]string{
-		"ducks": []string{"Picsou", "Donald"},
+		"ducks": {"Picsou", "Donald"},
 	})
 	assert.Equal(t, []string{"riri", "fifi", "loulou"}, ec.GetRecipients("test"))
 	assert.Equal(t, []string{"Picsou", "Donald"}, ec.GetRecipients("ducks"))
