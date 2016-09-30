@@ -1,6 +1,7 @@
 package natscrypto
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -48,8 +49,37 @@ func TestArgInfo(t *testing.T) {
 	}
 }
 
-func TestEncodedConn(t *testing.T) {
+func TestEncodedConnConstructor(t *testing.T) {
+	natsSrv := InitNatsTestServer(t)
+	defer natsSrv.Shutdown()
 
+	c := natsSrv.Connect(t)
+	if c == nil {
+		return
+	}
+	defer c.Close()
+
+	ec, err := NewConn(c, "me", DummyEncrypter{})
+	if err != nil {
+		t.Errorf("Could not init the encrypted conn: %s", err)
+		c.Close()
+		return
+	}
+	ec.SetSubjectRecipients("test", []string{"riri", "fifi", "loulou"})
+
+	_, err = NewEncodedConn(nil, "json")
+	assert.Equal(t, ErrNilConnection, err)
+
+	_, err = NewEncodedConn(ec, "unknown")
+	assert.Equal(t, "natscrypto: No encoder registered for 'unknown'", err.Error())
+
+	ec.CloseAll()
+	_, err = NewEncodedConn(ec, "json")
+	assert.Equal(t, nats.ErrConnectionClosed, err)
+
+}
+
+func TestEncodedConn(t *testing.T) {
 	natsSrv := InitNatsTestServer(t)
 	defer natsSrv.Shutdown()
 
@@ -72,7 +102,7 @@ func TestEncodedConn(t *testing.T) {
 		ec.Close()
 		return
 	}
-	defer enc.Close()
+	defer enc.CloseAll()
 
 	Run(t, "SubscribeSync", func(t *testing.T) {
 		s, err := enc.SubscribeSync("test")
@@ -112,13 +142,30 @@ func TestEncodedConn(t *testing.T) {
 		}
 
 	})
+	Run(t, "SubscribeSync NextMsg error", func(t *testing.T) {
+		s, err := enc.SubscribeSync("test")
+		assert.Nil(t, err)
+		defer s.Unsubscribe()
+
+		var (
+			subject  string
+			reply    string
+			question QuestionMsg
+		)
+		err = s.Next(&question, time.Millisecond)
+		assert.Equal(t, "nats: timeout", err.Error())
+		err = s.NextSubject(&subject, &question, time.Millisecond)
+		assert.Equal(t, "nats: timeout", err.Error())
+		err = s.NextSubjectReply(&subject, &reply, &question, time.Millisecond)
+		assert.Equal(t, "nats: timeout", err.Error())
+	})
 
 	Run(t, "Subscribe Raw", func(t *testing.T) {
 		var lastMsg *Msg
 		cb := func(msg *Msg) {
 			lastMsg = msg
 		}
-		s, err := enc.Subscribe("test", cb)
+		s, err := enc.QueueSubscribe("test", "", cb)
 		assert.Nil(t, err)
 		defer s.Unsubscribe()
 
@@ -128,6 +175,13 @@ func TestEncodedConn(t *testing.T) {
 		assert.NotNil(t, lastMsg)
 		assert.Equal(t, "test", lastMsg.Subject)
 		assert.Equal(t, `{"Text":"Question","Integer":38}`, string(lastMsg.Data))
+	})
+
+	Run(t, "Subscribe invalid handler", func(t *testing.T) {
+		_, err := enc.Subscribe("test", func() {})
+		assert.Equal(t, "natscrypto: Handler requires at least one argument", err.Error())
+		_, err = enc.Subscribe("test", func(a1, a2, a3, a4, a5 string) {})
+		assert.Equal(t, "natscrypto: Handler requires at most 4 arguments", err.Error())
 	})
 
 	Run(t, "Subscribe value", func(t *testing.T) {
@@ -194,6 +248,42 @@ func TestEncodedConn(t *testing.T) {
 		assert.Equal(t, 38, lastQuestion.Integer)
 	})
 
+	Run(t, "Subscribe subject/reply/signer/value", func(t *testing.T) {
+		var (
+			lastSubject  string
+			lastReply    string
+			lastSigner   string
+			lastQuestion *QuestionMsg
+			hit          = make(chan bool, 1)
+		)
+		cb := func(subject string, reply string, signer string, q *QuestionMsg) {
+			lastSubject = subject
+			lastReply = reply
+			lastSigner = signer
+			lastQuestion = q
+			hit <- true
+		}
+		s, err := enc.Subscribe("test", cb)
+		assert.Nil(t, err)
+		defer s.Unsubscribe()
+
+		question := QuestionMsg{Text: "Question", Integer: 38}
+		assert.Nil(t, enc.PublishRequest("test", "zereply", &question))
+		timeout := TimeoutChan(time.Millisecond * 250)
+		select {
+		case <-timeout:
+			t.Errorf("Callback not called")
+		case <-hit:
+
+			assert.NotNil(t, lastQuestion)
+			assert.Equal(t, "test", lastSubject)
+			assert.Equal(t, "zereply", lastReply)
+			assert.Equal(t, "Question", lastQuestion.Text)
+			assert.Equal(t, "me", lastSigner)
+			assert.Equal(t, 38, lastQuestion.Integer)
+		}
+	})
+
 	Run(t, "Request", func(t *testing.T) {
 		go func() {
 			s, err := enc.SubscribeSync("test")
@@ -209,18 +299,28 @@ func TestEncodedConn(t *testing.T) {
 			assert.Nil(t,
 				enc.Publish(reply, &AnswerMsg{Text: "The answer"}),
 			)
+
+			assert.Nil(t, s.NextSubjectReply(&subject, &reply, &question, 10*time.Millisecond))
+			assert.Nil(t,
+				enc.Publish(reply, &AnswerMsg{Text: "The answer"}),
+			)
 		}()
 
 		time.Sleep(time.Millisecond)
 
 		var answer AnswerMsg
+		q := QuestionMsg{Text: "The question", Integer: 9}
 
-		assert.Nil(t, enc.Request(
-			"test",
-			QuestionMsg{Text: "The question", Integer: 9},
-			&answer,
-			10*time.Millisecond,
-		))
+		err := enc.Request("test", q, &answer, time.Second)
+		assert.Nil(t, err)
+
+		var msg Msg
+		err = enc.Request("test", q, &msg, time.Second)
+		assert.Nil(t, err)
+		assert.Equal(t, `{"Text":"The answer"}`, string(msg.Data))
+
+		err = enc.Request("test", 42, &msg, time.Microsecond)
+		assert.Equal(t, "nats: timeout", err.Error())
 	})
 
 	Run(t, "SubscribeSync error handling", func(t *testing.T) {
@@ -257,4 +357,116 @@ func TestEncodedConn(t *testing.T) {
 
 		assert.False(t, hit)
 	})
+}
+
+type BadEncoder struct{}
+
+func (BadEncoder) Encode(string, interface{}) ([]byte, error) {
+	return nil, fmt.Errorf("Encoding failed")
+}
+
+func (BadEncoder) Decode(string, []byte, interface{}) error {
+	return fmt.Errorf("Decoding failed")
+}
+
+func TestEncoderErrors(t *testing.T) {
+	natsSrv := InitNatsTestServer(t)
+	defer natsSrv.Shutdown()
+
+	c := natsSrv.Connect(t)
+	if c == nil {
+		return
+	}
+
+	ec, err := NewConn(c, "me", DummyEncrypter{})
+	if err != nil {
+		t.Errorf("Could not init the encrypted conn: %s", err)
+		c.Close()
+		return
+	}
+	ec.SetSubjectRecipients("test", []string{"riri", "fifi", "loulou"})
+
+	nats.RegisterEncoder("bad", &BadEncoder{})
+	enc, err := NewEncodedConn(ec, "bad")
+	if err != nil {
+		t.Errorf("Could not init the encoded conn: %s", err)
+		ec.Close()
+		return
+	}
+	defer enc.CloseAll()
+
+	err = enc.Publish("test", 42)
+	assert.Equal(t, "Encoding failed", err.Error())
+
+	err = enc.PublishRequest("test", "reply", 42)
+	assert.Equal(t, "Encoding failed", err.Error())
+
+	var response int
+	err = enc.Request("test", 42, &response, time.Second)
+	assert.Equal(t, "Encoding failed", err.Error())
+}
+
+func TestRequestErrors(t *testing.T) {
+	natsSrv := InitNatsTestServer(t)
+	defer natsSrv.Shutdown()
+
+	c := natsSrv.Connect(t)
+	if c == nil {
+		return
+	}
+
+	ec, err := NewConn(c, "me", DummyEncrypter{})
+	if err != nil {
+		t.Errorf("Could not init the encrypted conn: %s", err)
+		c.Close()
+		return
+	}
+	ec.SetSubjectRecipients("test", []string{"riri", "fifi", "loulou"})
+
+	enc, err := NewEncodedConn(ec, "json")
+	if err != nil {
+		t.Errorf("Could not init the encoded conn: %s", err)
+		ec.Close()
+		return
+	}
+	defer enc.CloseAll()
+
+	var response int
+	err = enc.Request("test", 42, &response, time.Microsecond)
+	assert.Equal(t, "nats: timeout", err.Error())
+}
+
+func TestSubscribeErrors(t *testing.T) {
+	natsSrv := InitNatsTestServer(t)
+	defer natsSrv.Shutdown()
+
+	c := natsSrv.Connect(t)
+	if c == nil {
+		return
+	}
+
+	ec, err := NewConn(c, "me", DummyEncrypter{})
+	if err != nil {
+		t.Errorf("Could not init the encrypted conn: %s", err)
+		c.Close()
+		return
+	}
+	ec.SetSubjectRecipients("test", []string{"riri", "fifi", "loulou"})
+
+	enc, err := NewEncodedConn(ec, "json")
+	if err != nil {
+		t.Errorf("Could not init the encoded conn: %s", err)
+		ec.Close()
+		return
+	}
+	defer enc.CloseAll()
+
+	enc.Conn.Conn = nil
+	_, err = enc.Subscribe("test", nil)
+	assert.Equal(t, "nats: invalid connection", err.Error())
+
+	_, err = enc.QueueSubscribe("test", "queue", func(*Msg) {})
+	assert.Equal(t, "nats: invalid connection", err.Error())
+
+	enc.Conn.Conn = c
 }

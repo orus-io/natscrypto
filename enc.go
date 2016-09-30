@@ -72,7 +72,10 @@ func (s EncodedSubscription) NextSubjectReply(subject, reply *string, vPtr inter
 func (s *EncodedSubscription) makeMsgHandler(cb nats.Handler) (MsgHandler, error) {
 	argType, numArgs := argInfo(cb)
 	if argType == nil {
-		return nil, errors.New("nats: Handler requires at least one argument")
+		return nil, errors.New("natscrypto: Handler requires at least one argument")
+	}
+	if numArgs > 4 {
+		return nil, errors.New("natscrypto: Handler requires at most 4 arguments")
 	}
 
 	cbValue := reflect.ValueOf(cb)
@@ -124,8 +127,6 @@ func (s *EncodedSubscription) makeMsgHandler(cb nats.Handler) (MsgHandler, error
 			replyV := reflect.ValueOf(m.Reply)
 			signerV := reflect.ValueOf(m.Signer)
 			oV = []reflect.Value{subV, replyV, signerV, oValue}
-		default:
-			panic("Too many args (>4)")
 		}
 		cbValue.Call(oV)
 	}, nil
@@ -141,7 +142,7 @@ func NewEncodedConn(c *Conn, encType string) (*EncodedConn, error) {
 	}
 	encoder := nats.EncoderForType(encType)
 	if encoder == nil {
-		return nil, fmt.Errorf("No encoder registered for '%s'", encType)
+		return nil, fmt.Errorf("natscrypto: No encoder registered for '%s'", encType)
 	}
 	return &EncodedConn{Conn: c, Enc: encoder}, nil
 }
