@@ -287,7 +287,7 @@ func TestEncryptionFailures(t *testing.T) {
 	assert.Equal(t, err, ErrEncryptFailed)
 }
 
-func TestDecryptionFailures(t *testing.T) {
+func TestDecryptionFailuresWithoutHandler(t *testing.T) {
 	natsSrv := InitNatsTestServer(t)
 	defer natsSrv.Shutdown()
 
@@ -350,6 +350,24 @@ func TestDecryptionFailures(t *testing.T) {
 		time.Sleep(time.Millisecond)
 
 	})
+}
+
+func TestDecryptionFailuresWithPassThroughHandler(t *testing.T) {
+	natsSrv := InitNatsTestServer(t)
+	defer natsSrv.Shutdown()
+
+	c := natsSrv.Connect(t)
+	if c == nil {
+		return
+	}
+
+	ec, err := NewConn(c, "me", FailingEncrypter{})
+	if err != nil {
+		t.Errorf("Could not init the encrypted conn: %s", err)
+		c.Close()
+		return
+	}
+	defer ec.Close()
 
 	ec.SetDefaultDecryptErrorHandler(
 		func(sub *Subscription, msg *Msg) *Msg { return msg },
@@ -416,8 +434,24 @@ func TestDecryptionFailures(t *testing.T) {
 			t.Log("The chan go a message !")
 		}
 	})
+}
 
-	ec.SetDefaultDecryptErrorHandler(nil)
+func TestDecryptionFailuresWithBlockingHandler(t *testing.T) {
+	natsSrv := InitNatsTestServer(t)
+	defer natsSrv.Shutdown()
+
+	c := natsSrv.Connect(t)
+	if c == nil {
+		return
+	}
+
+	ec, err := NewConn(c, "me", FailingEncrypter{})
+	if err != nil {
+		t.Errorf("Could not init the encrypted conn: %s", err)
+		c.Close()
+		return
+	}
+	defer ec.Close()
 
 	makeBlockingHandler := func(t *testing.T, hit chan bool) DecryptErrorHandler {
 		return func(sub *Subscription, msg *Msg) *Msg {
