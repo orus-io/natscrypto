@@ -1,11 +1,52 @@
 package natscrypto
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats"
 	"github.com/stretchr/testify/assert"
 )
+
+var argInfoTests = []struct {
+	cb              nats.Handler
+	expectedType    reflect.Type
+	expectedNumArgs int
+	panics          bool
+}{
+	{
+		cb:              (func(string, *Msg) {}),
+		expectedType:    reflect.TypeOf(&Msg{}),
+		expectedNumArgs: 2,
+	},
+	{
+		cb:              (func(*Msg) {}),
+		expectedType:    reflect.TypeOf(&Msg{}),
+		expectedNumArgs: 1,
+	},
+	{
+		cb:              (func() {}),
+		expectedType:    nil,
+		expectedNumArgs: 0,
+	},
+	{
+		cb:     0,
+		panics: true,
+	},
+}
+
+func TestArgInfo(t *testing.T) {
+	for _, tt := range argInfoTests {
+		if tt.panics {
+			assert.Panics(t, func() { argInfo(tt.cb) })
+		} else {
+			typ, numArgs := argInfo(tt.cb)
+			assert.Equal(t, tt.expectedType, typ)
+			assert.Equal(t, tt.expectedNumArgs, numArgs)
+		}
+	}
+}
 
 func TestEncodedConn(t *testing.T) {
 
