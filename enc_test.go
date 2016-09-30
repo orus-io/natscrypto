@@ -74,7 +74,7 @@ func TestEncodedConn(t *testing.T) {
 	}
 	defer enc.Close()
 
-	t.Run("SubscribeSync", func(t *testing.T) {
+	Run(t, "SubscribeSync", func(t *testing.T) {
 		s, err := enc.SubscribeSync("test")
 		assert.Nil(t, err)
 		defer s.Unsubscribe()
@@ -113,7 +113,7 @@ func TestEncodedConn(t *testing.T) {
 
 	})
 
-	t.Run("Subscribe Raw", func(t *testing.T) {
+	Run(t, "Subscribe Raw", func(t *testing.T) {
 		var lastMsg *Msg
 		cb := func(msg *Msg) {
 			lastMsg = msg
@@ -130,7 +130,7 @@ func TestEncodedConn(t *testing.T) {
 		assert.Equal(t, `{"Text":"Question","Integer":38}`, string(lastMsg.Data))
 	})
 
-	t.Run("Subscribe value", func(t *testing.T) {
+	Run(t, "Subscribe value", func(t *testing.T) {
 		var lastQuestion *QuestionMsg
 		cb := func(q QuestionMsg) {
 			lastQuestion = &q
@@ -147,7 +147,7 @@ func TestEncodedConn(t *testing.T) {
 		assert.Equal(t, 38, lastQuestion.Integer)
 	})
 
-	t.Run("Subscribe subject/value", func(t *testing.T) {
+	Run(t, "Subscribe subject/value", func(t *testing.T) {
 		var (
 			lastSubject  string
 			lastQuestion *QuestionMsg
@@ -169,7 +169,7 @@ func TestEncodedConn(t *testing.T) {
 		assert.Equal(t, 38, lastQuestion.Integer)
 	})
 
-	t.Run("Subscribe subject/reply/value", func(t *testing.T) {
+	Run(t, "Subscribe subject/reply/value", func(t *testing.T) {
 		var (
 			lastSubject  string
 			lastReply    string
@@ -194,7 +194,7 @@ func TestEncodedConn(t *testing.T) {
 		assert.Equal(t, 38, lastQuestion.Integer)
 	})
 
-	t.Run("Request", func(t *testing.T) {
+	Run(t, "Request", func(t *testing.T) {
 		go func() {
 			s, err := enc.SubscribeSync("test")
 			assert.Nil(t, err)
@@ -223,7 +223,7 @@ func TestEncodedConn(t *testing.T) {
 		))
 	})
 
-	t.Run("SubscribeSync error handling", func(t *testing.T) {
+	Run(t, "SubscribeSync error handling", func(t *testing.T) {
 		s, err := enc.SubscribeSync("test")
 		if err != nil {
 			t.Fatal(err)
@@ -236,7 +236,7 @@ func TestEncodedConn(t *testing.T) {
 		assert.EqualError(t, err, "invalid character 'I' looking for beginning of value")
 	})
 
-	t.Run("Subscribe error handling", func(t *testing.T) {
+	Run(t, "Subscribe error handling", func(t *testing.T) {
 		var hit = false
 		cb := func(answer AnswerMsg) {
 			t.Error("Callback was called")

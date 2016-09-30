@@ -11,6 +11,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type RunSupport interface {
+	Run(string, func(t *testing.T)) bool
+}
+
+// Poorly Immitate testing.T.Run on go<1.7 versions
+func Run(t testing.TB, name string, test func(t *testing.T)) bool {
+	if runner, ok := t.(RunSupport); ok {
+		return runner.Run(name, test)
+	}
+	test(t.(*testing.T))
+	return t.Failed()
+}
+
 func TimeoutChan(duration time.Duration) chan bool {
 	timeout := make(chan bool, 1)
 	go func() {
@@ -291,7 +304,7 @@ func TestDecryptionFailures(t *testing.T) {
 	}
 	defer ec.Close()
 
-	t.Run("Subscribe no error handler", func(t *testing.T) {
+	Run(t, "Subscribe no error handler", func(t *testing.T) {
 		sub, err := ec.Subscribe("test", func(*Msg) { t.Error("Callback was called") })
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
@@ -303,7 +316,7 @@ func TestDecryptionFailures(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	})
 
-	t.Run("SyncSubscribe no error handler", func(t *testing.T) {
+	Run(t, "SyncSubscribe no error handler", func(t *testing.T) {
 		sub, err := ec.SubscribeSync("test")
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
@@ -316,7 +329,7 @@ func TestDecryptionFailures(t *testing.T) {
 		assert.Equal(t, ErrDecryptFailed, err)
 	})
 
-	t.Run("ChanSubscribe no error handler", func(t *testing.T) {
+	Run(t, "ChanSubscribe no error handler", func(t *testing.T) {
 		ch := make(chan *Msg)
 		defer close(ch)
 		go func() {
@@ -342,7 +355,7 @@ func TestDecryptionFailures(t *testing.T) {
 		func(sub *Subscription, msg *Msg) *Msg { return msg },
 	)
 
-	t.Run("Subscribe pass through handler", func(t *testing.T) {
+	Run(t, "Subscribe pass through handler", func(t *testing.T) {
 		var hit = make(chan bool, 1)
 		sub, err := ec.Subscribe("test", func(msg *Msg) {
 			hit <- true
@@ -363,7 +376,7 @@ func TestDecryptionFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("Subscribe pass through handler", func(t *testing.T) {
+	Run(t, "Subscribe pass through handler", func(t *testing.T) {
 		sub, err := ec.SubscribeSync("test")
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
@@ -376,7 +389,7 @@ func TestDecryptionFailures(t *testing.T) {
 		assert.Equal(t, ErrDecryptFailed, msg.Error)
 	})
 
-	t.Run("ChanSubscribe pass through handler", func(t *testing.T) {
+	Run(t, "ChanSubscribe pass through handler", func(t *testing.T) {
 		hit := make(chan bool, 1)
 		ch := make(chan *Msg)
 		defer close(ch)
@@ -414,7 +427,7 @@ func TestDecryptionFailures(t *testing.T) {
 		}
 	}
 
-	t.Run("Subscribe blocking handler", func(t *testing.T) {
+	Run(t, "Subscribe blocking handler", func(t *testing.T) {
 		sub, err := ec.Subscribe("test", func(*Msg) { t.Error("Callback was called") })
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
@@ -434,7 +447,7 @@ func TestDecryptionFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("SyncSubscribe blocking handler", func(t *testing.T) {
+	Run(t, "SyncSubscribe blocking handler", func(t *testing.T) {
 		sub, err := ec.SubscribeSync("test")
 		assert.Nil(t, err)
 		defer func() { assert.Nil(t, sub.Unsubscribe()) }()
@@ -458,7 +471,7 @@ func TestDecryptionFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("ChanSubscribe blocking handler", func(t *testing.T) {
+	Run(t, "ChanSubscribe blocking handler", func(t *testing.T) {
 		ch := make(chan *Msg)
 		defer close(ch)
 		go func() {
