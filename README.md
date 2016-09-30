@@ -11,4 +11,11 @@ PKI encryption to nats messages
 The encryption part is pluggable and a PGP implemention is provided
 
 The complete documentation is available here:
-https://godoc.org/github.com/orus-io/natscrypto
+
+https://godoc.org/gopkg.in/orus-io/natscrypto.v0
+
+## Get it
+
+```bash
+go get -u gopkg.in/orus.io/natscrypto.v0
+```
