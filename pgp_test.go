@@ -1,11 +1,6 @@
 package natscrypto
 
 // Tests for the PGPEncrypter
-//
-// TODO Missing tests are :
-// - encrypt errors
-// - decrypt errors
-// - signature errors
 
 import (
 	"fmt"
