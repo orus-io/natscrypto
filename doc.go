@@ -1,12 +1,12 @@
 /*
-Package natscrypto provides a PKI encryption layout on top of nats.Conn,
+Package natscrypto provides a PKI encryption layer on top of nats.Conn,
 as well a port of nats.EncodedConn on top of it.
 
 Introduction
 
 Once connected to a nats server, any client can subscribe and publish to any
 subject. When the nats server is shared among entities that should not be
-able to eardrop on each other, it can be a problem.
+able to eavesdrop on each other, it can be a problem.
 
 Our approach is to encrypt and sign each message with openpgp, so the actors
 can keep information private and certify the origin of the message.
@@ -29,7 +29,7 @@ First, we need to setup an encrypter that hold our keyring:
 	)
 
 	// Init the encrypter
-    encrypter := natscrypto.NewPGPEncrypter(publicEntities...)
+	encrypter := natscrypto.NewPGPEncrypter(publicEntities...)
 	encrypter.AddEntity(privateEntity)
 
 	// myidentity is my private key fingerprint. Only the encrypter
@@ -50,11 +50,11 @@ Then we can wrap the connection:
 
 Post a message:
 
-	// Declare for which identities should the messages sent to "test" be
+	// Declare for which identities messages sent to "test" should be
 	// encrypted
 	eConn.SetSubjectRecipients("test", rec1)
 
-	// The message ("hello") will be signed using the private key
+	// The message ("hello") will be signed using privateEntity
 	eConn.Publish("test", []byte("hello"))
 
 	// We can publish for arbitrary recipients on a single call
@@ -73,16 +73,20 @@ nats.Msg:
 
 - Signer: the id of the verified signer, or empty.
 - Recipients: the ids of the recipients (only one when receiving, but could be more
-  when emitting).
+when emitting).
 - Error: in some cases we can get messages that could be decrypted but have a signer
-  problem. In a error handler, the 'Error' attribute of the message will be set so
-  we can handle unknown signers gracefully (for example)
+problem. In a error handler, the 'Error' attribute of the message will be set so
+we can handle unknown signers gracefully (for example)
 
 
 Encoding
 
-The nats.EncodedConn cannot work on top of a natscrypto.Conn, so we ported it.
-natscrypto.EncodedConn has both the features of natscrypto.Conn and nats.EncodedConn
+EncodedConn are the preferred way to interface with NATS.
+They wrap a bare connection to a nats server and have an extendable encoder
+system that will encode and decode messages from raw Go types.
+
+Since nats.EncodedConn cannot work on top of a natscrypto.Conn, we ported it.
+natscrypto.EncodedConn has both the features of natscrypto.Conn and nats.EncodedConn.
 
 */
 package natscrypto
