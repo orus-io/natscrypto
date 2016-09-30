@@ -15,7 +15,7 @@ type RunSupport interface {
 	Run(string, func(t *testing.T)) bool
 }
 
-// Poorly Immitate testing.T.Run on go<1.7 versions
+// Poorly Imitate testing.T.Run on go<1.7 versions
 func Run(t testing.TB, name string, test func(t *testing.T)) bool {
 	if runner, ok := t.(RunSupport); ok {
 		return runner.Run(name, test)
