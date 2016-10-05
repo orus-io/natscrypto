@@ -217,8 +217,10 @@ func (c *Conn) decryptMsg(msg *nats.Msg) *Msg {
 		Recipients: recipients,
 		Error:      err,
 	}
-	if m.Reply != "" {
-		m.Reply = ""
+	if err == nil || err == ErrUnknownSigner || err == ErrUnsignedMessage {
+		if m.Reply != "" {
+			m.Reply = ""
+		}
 	}
 	if len(data) != 0 {
 		if bytes.HasPrefix(data, []byte("@@reply@@=")) {
