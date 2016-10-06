@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// ErrNonEncryptedResponse is returned by PublishUnencrypted if the response
+// is not encrypted.
+var ErrNonEncryptedResponse = errors.New("Non encrypted Response")
+
 // Dissect the cb Handler's signature (copied from nats/enc.go)
 func argInfo(cb nats.Handler) (reflect.Type, int) {
 	cbType := reflect.TypeOf(cb)
@@ -162,6 +166,15 @@ func (c *EncodedConn) PublishFor(subject string, v interface{}, recipients ...st
 	return c.Conn.PublishFor(subject, b, recipients...)
 }
 
+// PublishUnencrypted publishes the data encoded only, not encrypted
+func (c *EncodedConn) PublishUnencrypted(subject string, v interface{}) error {
+	b, err := c.Enc.Encode(subject, v)
+	if err != nil {
+		return err
+	}
+	return c.Conn.Conn.Publish(subject, b)
+}
+
 // PublishRequest will perform a Publish() expecting a response on the
 // reply subject. Use Request() for automatically waiting for a response
 // inline.
@@ -176,6 +189,15 @@ func (c *EncodedConn) PublishRequestFor(subject, reply string, v interface{}, re
 		return err
 	}
 	return c.Conn.PublishRequestFor(subject, reply, b, recipients...)
+}
+
+// PublishRequestUnencrypted publishes the data encoded only, not encrypted.
+func (c *EncodedConn) PublishRequestUnencrypted(subject, reply string, v interface{}) error {
+	b, err := c.Enc.Encode(subject, v)
+	if err != nil {
+		return err
+	}
+	return c.Conn.Conn.PublishRequest(subject, reply, b)
 }
 
 // Request will create an Inbox and perform a Request() call
@@ -202,6 +224,67 @@ func (c *EncodedConn) RequestFor(subject string, v interface{}, vPtr interface{}
 		err = c.Enc.Decode(m.Subject, m.Data, vPtr)
 	}
 	return err
+}
+
+// RequestUnsafe same as Request but if the response is not encryted or signed,
+// the message will be decoded anyway
+func (c *EncodedConn) RequestUnsafe(subject string, v interface{}, vPtr interface{}, timeout time.Duration) (encrypted bool, err error) {
+	inbox := nats.NewInbox()
+	ch := make(chan *nats.Msg, nats.RequestChanLen)
+
+	s, err := c.Conn.Conn.ChanSubscribe(inbox, ch)
+	if err != nil {
+		return false, err
+	}
+	s.AutoUnsubscribe(1)
+	defer s.Unsubscribe()
+
+	es := newSubscription(c.Conn).setSub(s)
+	ecs := EncodedSubscription{es, c.Enc}
+
+	encrypted = true
+	es.SetDecryptErrorHandler(func(sub *Subscription, msg *Msg) *Msg {
+		encrypted = false
+		msg.Error = nil
+		return msg
+	})
+
+	err = c.PublishRequest(subject, inbox, v)
+	if err != nil {
+		return false, err
+	}
+	return encrypted, ecs.Next(vPtr, timeout)
+}
+
+// RequestUnencrypted same as Request but the emitted message will _not_ be
+// encrypted. The reponse may be encrypted though, in which case it is transparenly
+// decrypted, and the returned bool is 'true'
+func (c *EncodedConn) RequestUnencrypted(subject string, v interface{}, vPtr interface{}, timeout time.Duration) (encrypted bool, err error) {
+	inbox := nats.NewInbox()
+	ch := make(chan *nats.Msg, nats.RequestChanLen)
+
+	s, err := c.Conn.Conn.ChanSubscribe(inbox, ch)
+	if err != nil {
+		return false, err
+	}
+	s.AutoUnsubscribe(1)
+	defer s.Unsubscribe()
+
+	es := newSubscription(c.Conn).setSub(s)
+	ecs := EncodedSubscription{es, c.Enc}
+
+	encrypted = true
+	es.SetDecryptErrorHandler(func(sub *Subscription, msg *Msg) *Msg {
+		encrypted = false
+		msg.Error = nil
+		return msg
+	})
+
+	err = c.PublishRequestUnencrypted(subject, inbox, v)
+	if err != nil {
+		return false, err
+	}
+	return encrypted, ecs.Next(vPtr, timeout)
 }
 
 // Subscribe will create a subscription on the given subject and process incoming
